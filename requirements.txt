@@ -47,7 +47,7 @@ ipykernel==6.5.0
 ipython==7.29.0
 itsdangerous==2.0.1
 jedi==0.18.1
-jhwutils==1.0
+# jhwutils==1.0
 Jinja2==3.0.3
 jupyter-client==7.0.6
 jupyter-core==4.9.1
