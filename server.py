@@ -1,7 +1,5 @@
 from enum import unique
 from fileinput import filename
-from pipes import Template
-from typing import Sequence
 from flask_sqlalchemy import SQLAlchemy
 import flask
 from flask import Flask
@@ -14,9 +12,22 @@ from flask import jsonify, make_response
 from flask_cors import CORS
 from strenum import StrEnum
 from flask_mail import Mail, Message
+import random
+import string
+
+def get_random_string(length):
+    letters = string.ascii_lowercase
+    result_str = ''.join(random.choice(letters) for i in range(length))
+    print("Random string of length", length, "is:", result_str)
+    return result_str
 
 def buildEmailAddress(student_id):
    return student_id+'@student.gla.ac.uk'
+
+def return_studentID(EmailAddress):
+   result = EmailAddress.split("@")
+   return result[0]
+
 app = Flask (__name__)
 app.config ['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///PeerReviewSystem.sqlite3'
 app.secret_key = 'super secret key'
@@ -58,8 +69,13 @@ class User(db.Model):
    def createStudent(self,EmailAddress):
       self.EmailAddress = EmailAddress
       self.UserType = UserTypes.student
+   def setProfile(self,password,firstName,lastName):
+      self.Password = password
+      self.FirstName = firstName
+      self.LastName = lastName   
    def __repr__(self) -> str:
        return super().__repr__()
+
 class UserSchema(ma.Schema):
     class Meta:
         fields = ("ID", "EmailAddress", "Password","FirstName","LastName","UserType")
@@ -272,7 +288,7 @@ class Submission(db.Model):
       self.AssignmentID = AssignmentID
       self.FileSubmission = FileSubmission
       self.FileName = FileName
-      self.submissionDate = datetime.now()
+      self.SubmissionDate = datetime.now()
       self.isMarked = False
 
 
@@ -282,6 +298,60 @@ class SubmissionSchema(ma.Schema):
 
 subSchema = SubmissionSchema()
 subSchema_ = SubmissionSchema(many=True) 
+
+class PeerReview(db.Model):
+   __tablename__ = 'peer-review-submission-'
+   ID = db.Column('ID', db.Integer, primary_key = True)
+   reviewerStudentID = db.Column(db.Integer , db.ForeignKey('student.ID'))
+   submissionStudentID = db.Column(db.Integer, db.ForeignKey('student.ID'))
+   AssignmentID = db.Column(db.Integer, db.ForeignKey('assignment.ID'))
+   TemplateID = db.Column(db.Integer, db.ForeignKey('questionaretemplate.ID'))
+   Sequence = db.Column(db.String)
+   Answer = db.Column(db.String)
+   isPeerReview = db.Column(db.Boolean)
+   SubmissionDate = db.Column(db.DateTime)
+
+
+   def __init__(self, reviewerStudentID, submissionStudentID,Sequence,AssignmentID,Answer):
+    self.reviewerStudentID = reviewerStudentID
+    self.submissionStudentID = 0
+    self.AssignmentID = AssignmentID
+    self.Sequence = Sequence
+    self.Answer = Answer
+    self.isPeerReview = True
+    self.reviewerStudentID = reviewerStudentID
+    self.submissionDate = datetime.now()
+
+
+
+class PeerSchema(ma.Schema):
+    class Meta:
+        fields = ("ID", "reviewerStudentID", "submissionStudentID","AssignmentID","TemplateID","Answer", "isPeerReview")
+
+peerSchema = PeerSchema()
+peerSchema_ = PeerSchema(many=True)  
+
+# @app.route('/post/peer/review', methods = ['POST'])
+# def peerReviewSubmission():
+#    data = request.get_json()
+#    print(data)
+#    return {
+
+#    }
+ 
+@app.route('/post/peer/review', methods = ['POST'])
+def peerReviewSubmission():
+   data = request.get_json()
+   print(data)
+   reviewerStudentID = data['reviewerStudentID']
+   submissionStudentID = data['submissionStudentID']
+   Sequence = data['Sequence']
+   Answer = data['Answer']
+   AssignmentID = data['AssignmentID']
+   obj = PeerReview(reviewerStudentID=reviewerStudentID,submissionStudentID=submissionStudentID,Sequence=Sequence,AssignmentID=AssignmentID,Answer=Answer)
+   db.session.add(obj)
+   db.session.commit()
+   return make_response(peerSchema.jsonify(obj),200)
 
 
 @app.route('/add/course/', methods = ['POST'])
@@ -323,13 +393,26 @@ def addSubmission():
    db.session.commit()
    return make_response(subSchema.jsonify(sub),200)
 
+@app.route('/get/submission/<assignment_id>/<student_id>', methods = ['GET'])
+def getSubmission(assignment_id,student_id):
+   subs = Submission.query.filter(Submission.AssignmentID == assignment_id,Submission.StudentID == student_id).first()
+   return make_response(subSchema.jsonify(subs),200)
+
+
+@app.route('/get/submissions/<assignment_id>/', methods = ['GET'])
+def getSubmissions(assignment_id):
+   subs = Submission.query.filter(Submission.AssignmentID == assignment_id).all()
+   return make_response(subSchema_.jsonify(subs),200)
+
 from flask import send_file
 
-@app.route('/download')
-def downloadFile():
-   path = "files/Assignment31Student2.pdf"
+@app.route('/download/<dir>/<file_name>', methods = ['GET'])
+def downloadFile(dir,file_name):
+   # data = request.get_json()
+   # path = data['path']
+   # print(path)
    # sub = Submission(StudentID=StudentID,AssignmentID=AssignmentID,FileSubmission=None,FileName=path)
-   return send_file(path, as_attachment=True)
+   return send_file(dir+'/'+file_name, as_attachment=True)
 
 @app.route('/login', methods = ['POST'])
 def login():
@@ -384,25 +467,48 @@ def updateCourse(course_id):
 @app.route('/delete/course/<course_id>', methods = ['DELETE'])
 def deleteCourse(course_id):
    course = Course.query.filter(Course.ID == course_id).first()
-   print(course)
+   enrolledStudents = StudentCourse.query.filter(StudentCourse.CourseID == course_id).all()
    if course is None :
       return make_response({
          "body":"No course found",
          "statusCode":"401"
       })
+   for s in enrolledStudents :
+    db.session.delete(s) 
    db.session.delete(course)
    db.session.commit()
    return make_response(courseSchema.jsonify(course),200)
 
 
-# msg = Message('Hello', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
-#    msg.body = "This is the email body"
-#    res = mail.send(msg)
+@app.route('/set/profile/<user_id>', methods = ['PUT'])
+def setProfile(user_id):
+   data = request.get_json()
+   password_ = data['Password']
+   fn = data['FirstName']
+   ln = data['LastName']
+   user = User.query.filter(User.ID == user_id).first()
+   user.setProfile(password_,fn,ln)
+   courses = StudentCourse.query.filter(StudentCourse.StudentID == user_id).all()
+   for i in courses :
+      i.Status = True
+      print(i)
+      db.session.add(i)
+   db.session.add(user)
+   db.session.commit()
+   return make_response({
+      "message":"Record Added successfully"
+   })
+
 @app.route('/reset/password/<user_id>', methods = ['POST'])
 def resetPassword(user_id):
    EmailAddress = buildEmailAddress(user_id)
-   msg = Message('Hello', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
-   msg.body = "This is the email body"
+   user =User.query.filter(User.EmailAddress == EmailAddress).first()
+   pass_ = get_random_string(7)
+   msg = Message('Reset Password for Peer Review Application', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
+   msg.body = "Hi  You have requested to reset the password for Peer Review Application" +". Your new password is "+pass_
+   user.Password = pass_
+   db.session.add(user)
+   db.session.commit()
    res = mail.send(msg)
    return make_response({
       "message":"Send Successfully"
@@ -426,9 +532,11 @@ def addStudentCourse(course_id):
       
    student = Student(user.ID) 
    db.session.add(student)
-   db.session.commit()    
+   db.session.commit()  
+
+   course_added = Course.query.filter(Course.ID == course_id).first()  
    msg = Message('Hello', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
-   msg.body = "This is the email body"
+   msg.html = "You have been added to "+ course_added.CourseName + "< br/> "+   "Click here to join the course" + "<a href='http://localhost:62284/setProfile?ID=" + str(user.ID) + "> Link </a>"
    res = mail.send(msg)
    studentCourse = StudentCourse.query.filter(StudentCourse.CourseID == course_id, StudentCourse.StudentID==user.ID).first()
    if studentCourse is not None :
@@ -604,20 +712,9 @@ def deleteQuestion(ID,TemplateID):
    db.session.delete(existingQuestion)
    db.session.commit()
    return make_response(QTSchema.jsonify(existingQuestion),200)
-#  Assignment creation 
-#  "CourseID":CourseID,
-#       "TemplateID":TemplateID ,
-#     "TaskName" : TaskName,
-#     "Explaination" : Explaination,
-#     "Weightage" : Weightage ,
-#     "SubmissionDate" : SubmissionDate,
-#      "PeerReviewDate" : PeerReviewDate
-# CourseID, TaskName,Explaination,Weightage
 @app.route('/add/assignment/', methods = ['POST'])
 def addAssignment():
    data = request.get_json()
-   print(data)
- 
    CourseID = data['CourseID']
    TemplateID = data['TemplateID']
    TaskName = data['TaskName']
@@ -626,6 +723,11 @@ def addAssignment():
    SubmissionDate = datetime.strptime(data['SubmissionDate'], "%m/%d/%Y").date()
    PeerReviewDate = datetime.strptime(data['PeerReviewDate'], "%m/%d/%Y").date()
    newAssignment = Assignment(CourseID=CourseID,TemplateID=TemplateID,TaskName=TaskName,Explaination=Explaination,Weightage=Weightage,SubmissionDate=SubmissionDate,PeerReviewDate=PeerReviewDate)
+   allCourses = Course.query.filter(Course.ID == CourseID).all()
+   print(allCourses)
+   for i in allCourses:
+      i.yesAssignment()
+      db.session.add(i)
    db.session.add(newAssignment)
    db.session.commit()
    return make_response(assSchema.jsonify(newAssignment),200)
@@ -743,5 +845,6 @@ def getQuestionare(assignment_id):
 
 if __name__ == '__main__':
    db.create_all()
+   # host='0.0.0.0', port=82,debug=True
    app.run()
 
