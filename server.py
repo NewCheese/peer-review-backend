@@ -1,5 +1,9 @@
+from ast import Assign
+from email.headerregistry import Group
+from email.policy import default
 from enum import unique
 from fileinput import filename
+from tokenize import group
 from flask_sqlalchemy import SQLAlchemy
 import flask
 from flask import Flask
@@ -14,6 +18,7 @@ from strenum import StrEnum
 from flask_mail import Mail, Message
 import random
 import string
+from  sqlalchemy.sql.expression import func
 
 def get_random_string(length):
     letters = string.ascii_lowercase
@@ -172,22 +177,25 @@ class QuestionareTemplate(db.Model):
    ID = db.Column('ID', db.Integer, primary_key = True)
    Name = db.Column(db.String(50), unique=True)  
    Description = db.Column(db.String(200))
+   TemplateType = db.Column(db.String)
    CreationDate = db.Column(db.DateTime)
    
 
-   def __init__(self, Name,Description):
+   def __init__(self, Name,Description,TemplateType):
       self.Name = Name
       self.Description = Description
+      self.TemplateType = TemplateType
       self.CreationDate = datetime.now()
    
-   def updateInformation(self, Name,Description):
+   def updateInformation(self, Name,Description,TemplateType):
       self.Name = Name
       self.Description = Description
+      self.TemplateType = TemplateType
       self.CreationDate = datetime.now()
 
 class QuestionareTemplateSchema(ma.Schema):
     class Meta:
-        fields = ("ID", "LecturerId", "Name","Description","CreationDate")
+        fields = ("ID", "LecturerId", "Name","Description","TemplateType","CreationDate")
 QTSchema = QuestionareTemplateSchema()
 QTSchema_ = QuestionareTemplateSchema(many=True)
 
@@ -219,30 +227,52 @@ quSchema_ = QuestionareSchema(many=True)
 
 
 class GroupWork(db.Model):
-   __tablename__ = 'groupwork'
+   __tablename__ = 'GroupWork'
    ID = db.Column('ID', db.Integer, primary_key = True)
+   AssignmentID = db.Column(db.Integer,db.ForeignKey('assignment.AssignmentID') )
+   GroupID = db.Column('GroupID',db.Integer)
    UserID = db.Column(db.String(200), db.ForeignKey('user.ID'))
-   GroupSize = db.Column(db.String(200))
 
-   def __init__(self,UserID,GroupSize) -> None:
+   def __init__(self,AssignmentID=None,GroupID=None,UserID=None) -> None:
        super().__init__()
        self.UserID = UserID
-       self.GroupSize = GroupSize
-  
+       self.GroupID = GroupID
+       self.AssignmentID = AssignmentID
+   def updateID(self,GroupID):
+      self.GroupID = GroupID
+       
 class Assignment(db.Model):
    __tablename__ = 'assignment'
    ID = db.Column('ID', db.Integer, primary_key = True)
+   AssignmentID = db.Column(db.Integer)
    CourseID = db.Column(db.Integer , db.ForeignKey('course.ID'))
    TemplateID = db.Column(db.String(200), db.ForeignKey('questionare.ID'))
-   GroupSubmission = db.Column(db.Integer, db.ForeignKey('groupwork.ID'))
+   GroupSubmission = db.Column(db.Integer, db.ForeignKey('GroupWork.GroupID'))
+   GroupSize = db.Column(db.Integer)
    Weightage = db.Column(db.Integer)
    TaskName = db.Column(db.String(200))
    Explaination = db.Column(db.String(200))
    CreationDate = db.Column(db.DateTime)
    SubmissionDate = db.Column(db.DateTime)
    PeerReviewDate = db.Column(db.DateTime)
+   SubmissionEndDate = db.Column(db.DateTime)
+   PeerReviewEndDate = db.Column(db.DateTime)
 
-   def __init__(self, CourseID, TemplateID,TaskName,Explaination,Weightage,SubmissionDate,PeerReviewDate):
+   def __init__(self,AssignmentID, CourseID, TemplateID,TaskName,Explaination,Weightage,SubmissionDate,PeerReviewDate,SubmissionEndDate,PeerReviewEndDate,GroupSubmission=None,GroupSize=None):
+      self.AssignmentID =AssignmentID
+      self.CourseID = CourseID
+      self.TemplateID = TemplateID
+      self.TaskName = TaskName
+      self.Explaination = Explaination
+      self.GroupSubmission = GroupSubmission
+      self.CreationDate = datetime.now()
+      self.Weightage = Weightage
+      self.SubmissionDate = SubmissionDate
+      self.PeerReviewDate = PeerReviewDate
+      self.GroupSize = GroupSize
+      self.PeerReviewEndDate = PeerReviewEndDate
+      self.SubmissionEndDate = SubmissionEndDate
+   def updateAssignment(self,CourseID,TemplateID,TaskName,SubmissionDate,PeerReviewDate,Explaination,Weightage,SubmissionEndDate,PeerReviewEndDate):
       self.CourseID = CourseID
       self.TemplateID = TemplateID
       self.TaskName = TaskName
@@ -252,20 +282,12 @@ class Assignment(db.Model):
       self.Weightage = Weightage
       self.SubmissionDate = SubmissionDate
       self.PeerReviewDate = PeerReviewDate
-   def updateAssignment(self,CourseID,TemplateID,TaskName,SubmissionDate,PeerReviewDate,Explaination,Weightage,):
-      self.CourseID = CourseID
-      self.TemplateID = TemplateID
-      self.TaskName = TaskName
-      self.Explaination = Explaination
-      self.GroupSubmission = None
-      self.CreationDate = datetime.now()
-      self.Weightage = Weightage
-      self.SubmissionDate = SubmissionDate
-      self.PeerReviewDate = PeerReviewDate
+      self.SubmissionEndDate = SubmissionEndDate
+      self.PeerReviewEndDate = PeerReviewEndDate
 
 class AssignmentSchema(ma.Schema):
     class Meta:
-        fields = ("ID", "CourseID", "TemplateID","GroupSubmission","TaskName","ID", "Explaination","Weightage", "SubmissionDate","PeerReviewDate","isSubmitted","isPeerReviewed")
+        fields = ("ID","AssignmentID","CourseID", "TemplateID","GroupSubmission","TaskName","ID", "Explaination","Weightage", "SubmissionDate","PeerReviewDate","isSubmitted","isPeerReviewed","GroupSize","SubmissionEndDate","PeerReviewEndDate")
 
 assSchema = AssignmentSchema()
 assSchema_ = AssignmentSchema(many=True)  
@@ -274,16 +296,18 @@ assSchema_ = AssignmentSchema(many=True)
 class Submission(db.Model):
    __tablename__ = 'submission'
    ID = db.Column('ID', db.Integer, primary_key = True)
+   GroupID = db.Column(db.Integer, db.ForeignKey('GroupWork.GroupID'))
    StudentID = db.Column(db.Integer , db.ForeignKey('questionaretemplate.ID'))
-   AssignmentID = db.Column(db.Integer , db.ForeignKey('assignment.ID'))
+   AssignmentID = db.Column(db.Integer , db.ForeignKey('assignment.AssignmentID'))
    FileName = db.Column(db.String)
    FileSubmission = db.Column(db.LargeBinary)
    SubmissionDate = db.Column(db.DateTime)
-   isMarked = db.Column(db.Boolean)
+   isMarked = db.Column(db.Boolean,default= False)
 
    
 
-   def __init__(self, StudentID, AssignmentID, FileSubmission,FileName):
+   def __init__(self,GroupID, StudentID, AssignmentID, FileSubmission,FileName):
+      self.GroupID = GroupID
       self.StudentID = StudentID
       self.AssignmentID = AssignmentID
       self.FileSubmission = FileSubmission
@@ -294,17 +318,19 @@ class Submission(db.Model):
 
 class SubmissionSchema(ma.Schema):
     class Meta:
-        fields = ("ID", "StudentID", "AssignmentID","FileSubmission","SubmissionDate","isMarked","FileName")
+        fields = ("ID","GroupID","StudentID", "AssignmentID","FileSubmission","SubmissionDate","isMarked","FileName")
 
 subSchema = SubmissionSchema()
 subSchema_ = SubmissionSchema(many=True) 
 
 class PeerReview(db.Model):
-   __tablename__ = 'peer-review-submission-'
+   __tablename__ = 'PeerReview'
    ID = db.Column('ID', db.Integer, primary_key = True)
+   SubmissionID =  db.Column(db.Integer , db.ForeignKey('submission.ID'))
    reviewerStudentID = db.Column(db.Integer , db.ForeignKey('student.ID'))
    submissionStudentID = db.Column(db.Integer, db.ForeignKey('student.ID'))
-   AssignmentID = db.Column(db.Integer, db.ForeignKey('assignment.ID'))
+   GroupID = db.Column(db.Integer, db.ForeignKey('GroupWork.GroupID'))
+   AssignmentID = db.Column(db.Integer, db.ForeignKey('assignment.AssignmentID'))
    TemplateID = db.Column(db.Integer, db.ForeignKey('questionaretemplate.ID'))
    Sequence = db.Column(db.String)
    Answer = db.Column(db.String)
@@ -312,47 +338,56 @@ class PeerReview(db.Model):
    SubmissionDate = db.Column(db.DateTime)
 
 
-   def __init__(self, reviewerStudentID, submissionStudentID,Sequence,AssignmentID,Answer):
+   def __init__(self, SubmissionID,GroupID,reviewerStudentID, submissionStudentID,Sequence,AssignmentID,Answer):
     self.reviewerStudentID = reviewerStudentID
-    self.submissionStudentID = 0
+    self.submissionStudentID = submissionStudentID
     self.AssignmentID = AssignmentID
     self.Sequence = Sequence
     self.Answer = Answer
     self.isPeerReview = True
     self.reviewerStudentID = reviewerStudentID
-    self.submissionDate = datetime.now()
-
+    self.SubmissionDate = datetime.now()
+    self.GroupID = GroupID
+    self.SubmissionID = SubmissionID
 
 
 class PeerSchema(ma.Schema):
     class Meta:
-        fields = ("ID", "reviewerStudentID", "submissionStudentID","AssignmentID","TemplateID","Answer", "isPeerReview")
+        fields = ("ID", "GroupID","reviewerStudentID", "submissionStudentID","AssignmentID","TemplateID","Answer", "isPeerReview","Sequence","SubmissionDate")
 
 peerSchema = PeerSchema()
 peerSchema_ = PeerSchema(many=True)  
 
-# @app.route('/post/peer/review', methods = ['POST'])
-# def peerReviewSubmission():
-#    data = request.get_json()
-#    print(data)
-#    return {
 
-#    }
  
 @app.route('/post/peer/review', methods = ['POST'])
 def peerReviewSubmission():
    data = request.get_json()
-   print(data)
+   SubmissionID = data["SubmissionID"]
    reviewerStudentID = data['reviewerStudentID']
    submissionStudentID = data['submissionStudentID']
+   GroupID = data['GroupID']
    Sequence = data['Sequence']
    Answer = data['Answer']
    AssignmentID = data['AssignmentID']
-   obj = PeerReview(reviewerStudentID=reviewerStudentID,submissionStudentID=submissionStudentID,Sequence=Sequence,AssignmentID=AssignmentID,Answer=Answer)
-   db.session.add(obj)
-   db.session.commit()
-   return make_response(peerSchema.jsonify(obj),200)
+   submission = Submission.query.filter(Submission.ID == SubmissionID).first()
+   submission.isMarked = True
+   db.session.add(submission)
+   if GroupID is 0 :
+      obj = PeerReview(SubmissionID=SubmissionID,GroupID=GroupID,reviewerStudentID=reviewerStudentID,submissionStudentID=submissionStudentID,Sequence=Sequence,AssignmentID=AssignmentID,Answer=Answer)
+      db.session.add(obj)
+      db.session.commit()
+      return make_response(peerSchema.jsonify(obj),200)
+   gp = GroupWork.query.filter(GroupWork.AssignmentID == AssignmentID, GroupWork.UserID == reviewerStudentID ).all()
+   result = []
+   for stud in gp :
+      obj = PeerReview(SubmissionID=SubmissionID,GroupID=stud.GroupID,reviewerStudentID=stud.UserID,submissionStudentID=submissionStudentID,Sequence=Sequence,AssignmentID=AssignmentID,Answer=Answer)  
+      result.append(obj)
+      db.session.add(obj)
+   db.session.commit()  
+   return make_response(assSchema_.jsonify(result),200)   
 
+   
 
 @app.route('/add/course/', methods = ['POST'])
 def addCourse():
@@ -384,11 +419,26 @@ def addSubmission():
    StudentID = request.form['StudentID']
    AssignmentID = request.form['AssignmentID']
    FileSubmission = request.files['file']
+   GroupID = int(request.form['GroupID'])
+   FileName = request.files['file'].filename
+   filename = FileName.split(".")
+   if GroupID > 0 :
+      studs = GroupWork.query.filter(GroupWork.GroupID == GroupID, GroupWork.AssignmentID == AssignmentID).all()
+      for stud in studs :    
+         path = "files/Assignment"+AssignmentID+"Student"+stud.UserID+"."+filename[1]
+         FileSubmission.save(path)
+         sub = Submission(GroupID =  stud.GroupID,StudentID=stud.UserID,AssignmentID=AssignmentID,FileSubmission=None,FileName=path)
+         db.session.add(sub)
+         db.session.commit()
+      return make_response({
+         "message":"Submitted successfully"
+      },200)
+   print("Invidual Assignment")   
    FileName = request.files['file'].filename
    filename = FileName.split(".")
    path = "files/Assignment"+AssignmentID+"Student"+StudentID+"."+filename[1]
    FileSubmission.save(path)
-   sub = Submission(StudentID=StudentID,AssignmentID=AssignmentID,FileSubmission=None,FileName=path)
+   sub = Submission(GroupID=GroupID,StudentID=StudentID,AssignmentID=AssignmentID,FileSubmission=None,FileName=path)
    db.session.add(sub)
    db.session.commit()
    return make_response(subSchema.jsonify(sub),200)
@@ -398,20 +448,25 @@ def getSubmission(assignment_id,student_id):
    subs = Submission.query.filter(Submission.AssignmentID == assignment_id,Submission.StudentID == student_id).first()
    return make_response(subSchema.jsonify(subs),200)
 
+@app.route('/get/peer/<assignment_id>/<student_id>', methods = ['GET'])
+def getPeerReview(assignment_id,student_id):
+   res = PeerReview.query.filter(PeerReview.AssignmentID == assignment_id, PeerReview.submissionStudentID == student_id).all()
+   return make_response(peerSchema_.jsonify(res),200)
 
-@app.route('/get/submissions/<assignment_id>/', methods = ['GET'])
-def getSubmissions(assignment_id):
-   subs = Submission.query.filter(Submission.AssignmentID == assignment_id).all()
+@app.route('/get/submissions/<assignment_id>/<student_id>', methods = ['GET'])
+def getSubmissions(assignment_id,student_id):
+   user = GroupWork.query.filter(GroupWork.AssignmentID == assignment_id, GroupWork.UserID == student_id).first()
+   if user is None :
+      print("Individual Submission")
+      subs = Submission.query.filter(Submission.AssignmentID == assignment_id, Submission.isMarked == False, Submission.StudentID != student_id).order_by(func.random()).limit(1).all()
+   else :
+      subs = Submission.query.filter(Submission.AssignmentID == assignment_id, Submission.isMarked == False,Submission.GroupID != user.GroupID).order_by(func.random()).limit(1).all()
    return make_response(subSchema_.jsonify(subs),200)
 
 from flask import send_file
 
 @app.route('/download/<dir>/<file_name>', methods = ['GET'])
 def downloadFile(dir,file_name):
-   # data = request.get_json()
-   # path = data['path']
-   # print(path)
-   # sub = Submission(StudentID=StudentID,AssignmentID=AssignmentID,FileSubmission=None,FileName=path)
    return send_file(dir+'/'+file_name, as_attachment=True)
 
 @app.route('/login', methods = ['POST'])
@@ -468,13 +523,11 @@ def updateCourse(course_id):
 def deleteCourse(course_id):
    course = Course.query.filter(Course.ID == course_id).first()
    enrolledStudents = StudentCourse.query.filter(StudentCourse.CourseID == course_id).all()
-   if course is None :
-      return make_response({
-         "body":"No course found",
-         "statusCode":"401"
-      })
+   assigned = Assignment.query.filter(Assignment.CourseID == course_id).all()
    for s in enrolledStudents :
     db.session.delete(s) 
+   for i in assigned :
+      db.session.delete(i)
    db.session.delete(course)
    db.session.commit()
    return make_response(courseSchema.jsonify(course),200)
@@ -483,12 +536,14 @@ def deleteCourse(course_id):
 @app.route('/set/profile/<user_id>', methods = ['PUT'])
 def setProfile(user_id):
    data = request.get_json()
+   print(data)
    password_ = data['Password']
    fn = data['FirstName']
    ln = data['LastName']
    user = User.query.filter(User.ID == user_id).first()
    user.setProfile(password_,fn,ln)
    courses = StudentCourse.query.filter(StudentCourse.StudentID == user_id).all()
+   print(courses)
    for i in courses :
       i.Status = True
       print(i)
@@ -535,9 +590,9 @@ def addStudentCourse(course_id):
    db.session.commit()  
 
    course_added = Course.query.filter(Course.ID == course_id).first()  
-   msg = Message('Hello', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
-   msg.html = "You have been added to "+ course_added.CourseName + "< br/> "+   "Click here to join the course" + "<a href='http://localhost:62284/setProfile?ID=" + str(user.ID) + "> Link </a>"
-   res = mail.send(msg)
+   # msg = Message('Hello', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
+   # msg.html = "You have been added to "+ course_added.CourseName + "< br/> "+   "Click here to join the course" + "<a href='http://localhost:62284/setProfile?ID=" + str(user.ID) + "> Link </a>"
+   # res = mail.send(msg)
    studentCourse = StudentCourse.query.filter(StudentCourse.CourseID == course_id, StudentCourse.StudentID==user.ID).first()
    if studentCourse is not None :
       return make_response({
@@ -591,6 +646,7 @@ def addTemplate():
    data = request.get_json()
    Name = data['Name']
    Description = data['Description']
+   TemplateType = data['Format']
    existingTemplate = QuestionareTemplate.query.filter(QuestionareTemplate.Name == Name).first() 
    if existingTemplate is not None :
       print("returned")
@@ -598,7 +654,7 @@ def addTemplate():
          "message" : "Course Already exists" ,
          "statusCode" : "403"
       })
-   newTemplate = QuestionareTemplate(Name=Name,Description=Description)
+   newTemplate = QuestionareTemplate(Name=Name,Description=Description,TemplateType=TemplateType)
    db.session.add(newTemplate)
    db.session.commit()
    return make_response(QTSchema.jsonify(newTemplate),200)
@@ -630,16 +686,16 @@ def putTemplate(template_id):
    data = request.get_json()
    Name = data['Name']
    Description = data['Description']
+   Format = data['Format']
    existingTemplate = QuestionareTemplate.query.filter(QuestionareTemplate.Name == Name).first() 
-   print(existingTemplate)
    if existingTemplate is not None :
       print(existingTemplate)
       return make_response({
          "message" : "Course name already present,Try a unique name" ,
          "statusCode" : "403"
       })
-   existingTemplate = QuestionareTemplate.query.filter(QuestionareTemplate.ID == template_id).first()    
-   existingTemplate.updateInformation(Name,Description)
+   existingTemplate = QuestionareTemplate.query.filter(QuestionareTemplate.ID == template_id).first() 
+   existingTemplate.updateInformation(Name,Description,Format)
    db.session.add(existingTemplate)
    db.session.commit()
    return make_response(QTSchema.jsonify(existingTemplate),200)
@@ -715,16 +771,51 @@ def deleteQuestion(ID,TemplateID):
 @app.route('/add/assignment/', methods = ['POST'])
 def addAssignment():
    data = request.get_json()
+   AssignmentID = data['AssignmentID']
    CourseID = data['CourseID']
    TemplateID = data['TemplateID']
    TaskName = data['TaskName']
    Explaination = data['Explaination']
    Weightage = data['Weightage']
+   GroupSize = data['GroupSize']
    SubmissionDate = datetime.strptime(data['SubmissionDate'], "%m/%d/%Y").date()
    PeerReviewDate = datetime.strptime(data['PeerReviewDate'], "%m/%d/%Y").date()
-   newAssignment = Assignment(CourseID=CourseID,TemplateID=TemplateID,TaskName=TaskName,Explaination=Explaination,Weightage=Weightage,SubmissionDate=SubmissionDate,PeerReviewDate=PeerReviewDate)
+   SubmissionEndDate = datetime.strptime(data['SubmissionEndDate'], "%m/%d/%Y").date()
+   PeerReviewEndDate = datetime.strptime(data['PeerReviewEndDate'], "%m/%d/%Y").date()
+   if int(GroupSize) > 0 :
+      allStudents = StudentCourse.query.filter(StudentCourse.CourseID == CourseID).all()
+      # print(len(allStudents))
+      c = 0
+      g_size = int(GroupSize)
+      groupkey = 0
+      while len(allStudents) > 0 :
+         if c==g_size :
+            c = 0
+         if c==0:
+            print("New group formed")
+            stud = random.choice(allStudents)
+            print(stud.StudentID)
+            gp = GroupWork(AssignmentID=AssignmentID,UserID=stud.StudentID)
+            db.session.add(gp)
+            db.session.commit()
+            groupkey = gp.ID
+            gp.updateID(GroupID=groupkey)
+            db.session.add(gp)
+            db.session.commit()
+            newAssignment = Assignment(AssignmentID=AssignmentID,CourseID=CourseID,TemplateID=TemplateID,TaskName=TaskName,Explaination=Explaination,Weightage=Weightage,SubmissionDate=SubmissionDate,PeerReviewDate=PeerReviewDate,GroupSubmission=groupkey,GroupSize=int(GroupSize),SubmissionEndDate=SubmissionEndDate,PeerReviewEndDate=PeerReviewEndDate)
+            db.session.add(newAssignment)  
+         else :
+            stud = random.choice(allStudents)
+            gp = GroupWork(AssignmentID=AssignmentID,GroupID=groupkey,UserID=stud.StudentID) 
+            db.session.add(gp)
+            db.session.commit()
+         allStudents.remove(stud)
+         c += 1
+      
+      
+   else :
+      newAssignment = Assignment(AssignmentID=AssignmentID,CourseID=CourseID,TemplateID=TemplateID,TaskName=TaskName,Explaination=Explaination,Weightage=Weightage,SubmissionDate=SubmissionDate,PeerReviewDate=PeerReviewDate,SubmissionEndDate=SubmissionEndDate,PeerReviewEndDate=PeerReviewEndDate) 
    allCourses = Course.query.filter(Course.ID == CourseID).all()
-   print(allCourses)
    for i in allCourses:
       i.yesAssignment()
       db.session.add(i)
@@ -734,7 +825,7 @@ def addAssignment():
 
 @app.route('/get/assignments/', methods = ['GET'])
 def getAssignments():
-   assignments = Assignment.query.all()
+   assignments = Assignment.query.group_by(Assignment.AssignmentID).all()
    return make_response(assSchema_.jsonify(assignments),200)   
 
 
@@ -750,9 +841,7 @@ def getAssignment(ass_id):
 
 @app.route('/get/course/assignment/<course_id>', methods = ['GET'])
 def getAssignmentByCourseId(course_id):
-   print(course_id)
-   assignment = Assignment.query.filter(Assignment.CourseID == course_id).all()
-   print(assignment)
+   assignment = Assignment.query.filter(Assignment.CourseID == course_id).group_by(Assignment.AssignmentID).all()
    if assignment is None :
       return make_response({
          "message" : "No Assignment found" ,
@@ -760,6 +849,19 @@ def getAssignmentByCourseId(course_id):
       })
    return make_response(assSchema_.jsonify(assignment),200)    
 
+@app.route('/get/course/assignment/<course_id>/<user_id>', methods = ['GET'])
+def getGroupAssignmentByCourseId(course_id,user_id):
+   assignment = Assignment.query.filter(Assignment.CourseID == course_id).all()
+   result = []
+   for ass in assignment :
+     g_id = ass.GroupSubmission
+     if g_id is None :
+      result.append(ass)
+      continue
+     gp = GroupWork.query.filter(GroupWork.GroupID == g_id, GroupWork.UserID == user_id, GroupWork.AssignmentID == ass.AssignmentID).first()
+     if gp is not None :
+      result.append(ass)
+   return make_response(assSchema_.jsonify(result),200)   
 
 @app.route('/put/assignment/<ass_id>', methods = ['PUT'])
 def updateAssignment(ass_id):
@@ -777,15 +879,18 @@ def updateAssignment(ass_id):
    Weightage = data['Weightage']
    SubmissionDate = datetime.strptime(data['SubmissionDate'], "%m/%d/%Y").date()
    PeerReviewDate = datetime.strptime(data['PeerReviewDate'], "%m/%d/%Y").date()
-   assignment.updateAssignment(CourseID,TemplateID,TaskName,SubmissionDate,PeerReviewDate,Explaination,Weightage)  
+   SubmissionEndDate = datetime.strptime(data['SubmissionEndDate'], "%m/%d/%Y").date()
+   PeerReviewEndDate = datetime.strptime(data['PeerReviewEndDate'], "%m/%d/%Y").date()
+   assignment.updateAssignment(CourseID,TemplateID,TaskName,SubmissionDate,PeerReviewDate,Explaination,Weightage,SubmissionEndDate,PeerReviewEndDate)  
    db.session.add(assignment)
    db.session.commit() 
    return make_response(assSchema.jsonify(assignment),200)  
 
 @app.route('/delete/assignment/<ID>', methods = ['DELETE'])
 def deleteAssignment(ID):
-   existingAssignment = Assignment.query.filter(Assignment.ID == ID).first() 
-   db.session.delete(existingAssignment)
+   existingAssignment = Assignment.query.filter(Assignment.AssignmentID == ID).all() 
+   for d in existingAssignment :
+      db.session.delete(d)
    db.session.commit()
    return make_response(assSchema.jsonify(existingAssignment),200)     
 
@@ -823,9 +928,105 @@ def getQuestionare(assignment_id):
 
 
 
+def getStudentID(ID):
+   user = User.query.filter(User.ID == ID).first()
+   email = user.EmailAddress
+   emails = email.split("@")
+   return emails[0]
+
+#  ID = db.Column('ID', db.Integer, primary_key = True)
+#    GroupID = db.Column(db.Integer, db.ForeignKey('GroupWork.GroupID'))
+#    StudentID = db.Column(db.Integer , db.ForeignKey('questionaretemplate.ID'))
+#    AssignmentID = db.Column(db.Integer , db.ForeignKey('assignment.AssignmentID'))
+#    FileName = db.Column(db.String)
+#    FileSubmission = db.Column(db.LargeBinary)
+#    SubmissionDate = db.Column(db.DateTime)
+#    isMarked = db.Column(db.Boolean)
+def getOutcome(res):
+   marks = 0
+   feedback = ""
+   resultType = True
+   for i in res :
+      if i.Answer.isnumeric() :
+         marks += int(i.Answer)
+      else :
+         feedback += i.Sequence + ') ' +i.Answer + ','
+         resultType = False
+
+   if resultType : 
+      return marks/len(res);  
+   return feedback
+
+def getReviewID(res):
+   return getStudentID(res[0].reviewerStudentID)
+
+class DownloadSchema(ma.Schema):
+    class Meta:
+        fields = ("SubmissionStudentID","FileName", "SubmissionDate","AssignmentID","PeerReview","ReviewedStudentID","PeerReviewStudentIDS","SubmissionGroupStudents")
+
+downSchema = DownloadSchema()
+downSchema_ = DownloadSchema(many=True)    
+@app.route('/get/results/<assignment_id>', methods = ['GET'])
+def getResults(assignment_id):
+   result = []
+   subs = Submission.query.filter(Submission.AssignmentID == assignment_id).all()
+   if subs is None :
+      return make_response({
+         "message":"No Submissions found",
+         "errorCode": "404"
+      })
+   answer = {}  
+   for i in subs :
+      answer["SubmissionStudentID"] = getStudentID(i.StudentID)
+      answer["FileName"] = i.FileName
+      answer["SubmissionDate"] = i.SubmissionDate
+      answer["AssignmentID"] = assignment_id
+      submissionID = i.ID
+      peerResults = PeerReview.query.filter(PeerReview.SubmissionID == submissionID).all()
+      if len(peerResults) == 0:
+         continue
+      answer["PeerReview"] = getOutcome(peerResults)
+      answer["ReviewedStudentID"] = getReviewID(peerResults)
+      print("Submission group ids")
+      print(i.GroupID)
+      if i.GroupID is not 0 :
+         users = GroupWork.query.filter(GroupWork.GroupID == i.GroupID, GroupWork.AssignmentID == assignment_id).all()
+         groupUsers = ""
+         for u in users :
+            groupUsers += getStudentID(u.UserID) +' ,'
+         answer["SubmissionGroupStudents"] = groupUsers
+         answer["AssignmentType"] = "Group"
+      else :
+         answer["AssignmentType"] = "Individual"
+      
+      PeerUsers = ""
+      if peerResults[0].GroupID is not 0 :
+         g_id = peerResults[0].GroupID 
+         print("Peer reviewed ID is ")
+         print(g_id)
+         users = GroupWork.query.filter(GroupWork.GroupID == g_id, GroupWork.AssignmentID == assignment_id).all()
+         print(users)
+         for u in users :
+            PeerUsers += getStudentID(u.UserID) +' ,'
+         answer["PeerReviewStudentIDS"] = PeerUsers
+      # print(answer)
+      result.append(answer)
+      answer = {}
+   return make_response(downSchema_.jsonify(result),200)  
 
 
-    
+@app.route('/get/results/<assignment_id>/<student_id>', methods = ['GET'])
+def getPeerResults(assignment_id,student_id):
+   res = PeerReview.query.filter(PeerReview.AssignmentID == assignment_id,
+                           PeerReview.reviewerStudentID == student_id).all()
+
+   if len(res) >0 :
+      print(len(res))
+      return make_response(peerSchema_.jsonify(res),200)
+   
+   return make_response({
+      "message" : 1
+   },200)
 
     
 
@@ -845,6 +1046,5 @@ def getQuestionare(assignment_id):
 
 if __name__ == '__main__':
    db.create_all()
-   # host='0.0.0.0', port=82,debug=True
-   app.run()
+   app.run(host='0.0.0.0', port=88,debug=True)
 
