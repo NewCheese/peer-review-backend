@@ -332,11 +332,11 @@ class PeerReview(db.Model):
    GroupID = db.Column(db.Integer, db.ForeignKey('GroupWork.GroupID'))
    AssignmentID = db.Column(db.Integer, db.ForeignKey('assignment.AssignmentID'))
    TemplateID = db.Column(db.Integer, db.ForeignKey('questionaretemplate.ID'))
-   Sequence = db.Column(db.String)
+   Sequence = db.Column(db.Integer)
    Answer = db.Column(db.String)
    isPeerReview = db.Column(db.Boolean)
    SubmissionDate = db.Column(db.DateTime)
-
+   Rating = db.Column(db.Integer)
 
    def __init__(self, SubmissionID,GroupID,reviewerStudentID, submissionStudentID,Sequence,AssignmentID,Answer):
     self.reviewerStudentID = reviewerStudentID
@@ -353,13 +353,19 @@ class PeerReview(db.Model):
 
 class PeerSchema(ma.Schema):
     class Meta:
-        fields = ("ID", "GroupID","reviewerStudentID", "submissionStudentID","AssignmentID","TemplateID","Answer", "isPeerReview","Sequence","SubmissionDate")
+        fields = ("ID", "Rating","GroupID","reviewerStudentID", "submissionStudentID","AssignmentID","TemplateID","Answer", "isPeerReview","Sequence","SubmissionDate")
 
 peerSchema = PeerSchema()
 peerSchema_ = PeerSchema(many=True)  
 
 
- 
+@app.route('/is/working')
+def isWorking():
+   print("I am here")
+   return {
+      "status_code":200
+   }
+
 @app.route('/post/peer/review', methods = ['POST'])
 def peerReviewSubmission():
    data = request.get_json()
@@ -481,8 +487,6 @@ def login():
       return make_response(
          userSchema.jsonify(user),200
       )
-
-
    return make_response({
       "message":"Something went wrong, please enter a valid username and password",
       "errorCode":"404"
@@ -584,15 +588,17 @@ def addStudentCourse(course_id):
       # can add a status column in student table to confirm if they have joined 
       db.session.add(user)
       db.session.commit()  
-      
    student = Student(user.ID) 
    db.session.add(student)
    db.session.commit()  
 
    course_added = Course.query.filter(Course.ID == course_id).first()  
-   # msg = Message('Hello', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
-   # msg.html = "You have been added to "+ course_added.CourseName + "< br/> "+   "Click here to join the course" + "<a href='http://localhost:62284/setProfile?ID=" + str(user.ID) + "> Link </a>"
-   # res = mail.send(msg)
+   msg = Message('Hello', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
+   msg.html = "You have been added to "+ course_added.CourseName + "< br/> "
+   + "Click here to join the course" 
+   + "<a href='http://localhost:62284/setProfile?ID=" 
+   + str(user.ID) + "> Link </a>"
+   res = mail.send(msg)
    studentCourse = StudentCourse.query.filter(StudentCourse.CourseID == course_id, StudentCourse.StudentID==user.ID).first()
    if studentCourse is not None :
       return make_response({
@@ -681,6 +687,33 @@ def getTemplate(template_id):
    
    return make_response(QTSchema.jsonify(existingTemplates),200)
 
+
+@app.route('/put/stars/<ID>', methods = ['PUT'])
+def putStars(ID):
+   data = request.get_json()
+   stars = int(data['Stars'])
+   assignment_id = data['AssignmentID']
+   sub = Submission.query.filter(Submission.AssignmentID == assignment_id, Submission.StudentID == ID).first()
+   if sub.GroupID is not 0 :
+      gps = GroupWork.query.filter(GroupWork.AssignmentID == assignment_id , GroupWork.GroupID == sub.GroupID).all()
+      for i in gps :
+         res = PeerReview.query.filter(PeerReview.AssignmentID == assignment_id, PeerReview.submissionStudentID == i.UserID).all()
+         if len(res) is not 0 :
+            break
+      for k in res :
+         k.Rating = stars
+         db.session.add(k)
+         db.session.commit()
+      return make_response(peerSchema_.jsonify(res),200)
+   else :
+      res = PeerReview.query.filter(PeerReview.AssignmentID == assignment_id,
+                           PeerReview.submissionStudentID == ID).all()
+      for k in res :
+         k.Rating = stars
+         db.session.add(k)
+         db.session.commit()
+      return make_response(peerSchema_.jsonify(res),200)
+
 @app.route('/put/template/<template_id>', methods = ['PUT'])
 def putTemplate(template_id):
    data = request.get_json()
@@ -703,6 +736,9 @@ def putTemplate(template_id):
 @app.route('/delete/template/<template_id>', methods = ['DELETE'])
 def deleteTemplate(template_id):
    existingTemplate = QuestionareTemplate.query.filter(QuestionareTemplate.ID == template_id).first() 
+   allQuestions = Questionare.query.filter(Questionare.TemplateID == existingTemplate.ID).all()
+   for i in allQuestions :
+      db.session.delete(i)
    db.session.delete(existingTemplate)
    db.session.commit()
    return make_response(QTSchema.jsonify(existingTemplate),200)
@@ -962,7 +998,7 @@ def getReviewID(res):
 
 class DownloadSchema(ma.Schema):
     class Meta:
-        fields = ("SubmissionStudentID","FileName", "SubmissionDate","AssignmentID","PeerReview","ReviewedStudentID","PeerReviewStudentIDS","SubmissionGroupStudents")
+        fields = ("SubmissionStudentID","FileName", "SubmissionDate","AssignmentID","PeerReview","ReviewedStudentID","PeerReviewStudentIDS","SubmissionGroupStudents","Rating")
 
 downSchema = DownloadSchema()
 downSchema_ = DownloadSchema(many=True)    
@@ -1015,6 +1051,24 @@ def getResults(assignment_id):
    return make_response(downSchema_.jsonify(result),200)  
 
 
+@app.route('/get/reviews/<assignment_id>/<student_id>', methods = ['GET'])
+def getPeerReviews(assignment_id,student_id):
+   sub = Submission.query.filter(Submission.AssignmentID == assignment_id, Submission.StudentID == student_id).first()
+   if sub.GroupID is not 0 :
+      gps = GroupWork.query.filter(GroupWork.AssignmentID == assignment_id , GroupWork.GroupID == sub.GroupID).all()
+      for i in gps :
+         res = PeerReview.query.filter(PeerReview.AssignmentID == assignment_id, PeerReview.submissionStudentID == i.UserID).all()
+         print(res)
+         if len(res) is not 0 :
+            break
+      return make_response(peerSchema_.jsonify(res),200)
+   else :
+      res = PeerReview.query.filter(PeerReview.AssignmentID == assignment_id,
+                           PeerReview.submissionStudentID == student_id).all()
+
+      return make_response(peerSchema_.jsonify(res),200)
+    
+
 @app.route('/get/results/<assignment_id>/<student_id>', methods = ['GET'])
 def getPeerResults(assignment_id,student_id):
    res = PeerReview.query.filter(PeerReview.AssignmentID == assignment_id,
@@ -1046,5 +1100,6 @@ def getPeerResults(assignment_id,student_id):
 
 if __name__ == '__main__':
    db.create_all()
-   app.run(host='0.0.0.0', port=88,debug=True)
+   # host='0.0.0.0', port=88,debug=True
+   app.run(host='0.0.0.0', port=82,debug=True)
 
