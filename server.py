@@ -594,7 +594,7 @@ def addStudentCourse(course_id):
 
    course_added = Course.query.filter(Course.ID == course_id).first()  
    msg = Message('Module assigned', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
-   msg.html = "You have been added to "+ course_added.CourseName +", Click here to join the course" + "<a href='https://peer-review-backend.herokuapp.com//setProfile?ID={}'> Link </a>".format(user.ID)
+   msg.html = "You have been added to "+ course_added.CourseName +", Click here to join the course" + "<a href='https://peer-review-system-uog.herokuapp.com/setProfile?ID={}'> Link </a>".format(user.ID)
    res = mail.send(msg)
    studentCourse = StudentCourse.query.filter(StudentCourse.CourseID == course_id, StudentCourse.StudentID==user.ID).first()
    if studentCourse is not None :
