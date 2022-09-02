@@ -19,7 +19,7 @@ from flask_mail import Mail, Message
 import random
 import string
 from  sqlalchemy.sql.expression import func
-
+from cryptography.fernet import Fernet
 def get_random_string(length):
     letters = string.ascii_lowercase
     result_str = ''.join(random.choice(letters) for i in range(length))
@@ -41,11 +41,16 @@ db = SQLAlchemy(app)
 ma = Marshmallow(app)
 CORS(app)
 
+# key = Fernet.generate_key()
+# fernet = Fernet(key)
 
+key = "azUXsRqV_Wv4ooxceKMTxDMFVxnF36LhD4RCnBFzFRE="
+fernet = Fernet(key)
+email_temp_password = "gAAAAABjEV5iNOSJtzIbdm97q9HAjkD7thebjUQTT7Z8KkfDDfKYdmz9WWwD-1QWlEs6vRptzZcwg_m0db9eh9y2ItwUPwAz5Hf0wmRhl_zAQna_S5ZraXw="
 app.config['MAIL_SERVER']='smtp.gmail.com'
 app.config['MAIL_PORT'] = 465
 app.config['MAIL_USERNAME'] = 'w1234panku@gmail.com'
-app.config['MAIL_PASSWORD'] = "ldqbwxhsxdzrdghb"
+app.config['MAIL_PASSWORD'] = str(fernet.decrypt(email_temp_password.encode()).decode())
 app.config['MAIL_USE_TLS'] = False
 app.config['MAIL_USE_SSL'] = True
 mail = Mail(app)
@@ -359,12 +364,7 @@ peerSchema = PeerSchema()
 peerSchema_ = PeerSchema(many=True)  
 
 
-@app.route('/is/working')
-def isWorking():
-   print("I am here")
-   return {
-      "status_code":200
-   }
+
 
 @app.route('/post/peer/review', methods = ['POST'])
 def peerReviewSubmission():
@@ -593,11 +593,8 @@ def addStudentCourse(course_id):
    db.session.commit()  
 
    course_added = Course.query.filter(Course.ID == course_id).first()  
-   msg = Message('Hello', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
-   msg.html = "You have been added to "+ course_added.CourseName + "< br/> "
-   + "Click here to join the course" 
-   + "<a href='http://localhost:62284/setProfile?ID=" 
-   + str(user.ID) + "> Link </a>"
+   msg = Message('Module assigned', sender = 'w1234panku@@gmail.com', recipients = [EmailAddress])
+   msg.html = "You have been added to "+ course_added.CourseName +", Click here to join the course" + "<a href='https://peer-review-backend.herokuapp.com//setProfile?ID={}'> Link </a>".format(user.ID)
    res = mail.send(msg)
    studentCourse = StudentCourse.query.filter(StudentCourse.CourseID == course_id, StudentCourse.StudentID==user.ID).first()
    if studentCourse is not None :
@@ -653,9 +650,8 @@ def addTemplate():
    Name = data['Name']
    Description = data['Description']
    TemplateType = data['Format']
-   existingTemplate = QuestionareTemplate.query.filter(QuestionareTemplate.Name == Name).first() 
+   existingTemplate = QuestionareTemplate.query.filter(QuestionareTemplate.Name == Name).first()
    if existingTemplate is not None :
-      print("returned")
       return make_response({
          "message" : "Course Already exists" ,
          "statusCode" : "403"
