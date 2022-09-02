@@ -101,3 +101,6 @@ Werkzeug==2.0.2
 wrapt==1.14.1
 zipp==3.6.0
 zope.interface==5.4.0
+cryptography===37.0.4
+pycparser===2.21
+cffi===1.15.1
